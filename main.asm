@@ -1,45 +1,50 @@
 jmp reset
 
-.def temp = r16 ; used for configuration
-.def countSeconds = r17 ; counts how many seconds have passed
-
-.def currentFloor = r18 ; keeps the current floor of the elevator
-; current floor consts 
-#define GROUND_FLOOR 0
+; Floor constants
 #define FIRST_FLOOR 1
+#define GROUND_FLOOR 0
 #define SECOND_FLOOR 2
 
-.def calledFloor = r18 ; floor called last
-; it uses the same consts above
+; Elevator status constants
+#define IDLE 0 ; Stopped
+#define GOING_UP 1 ; Going up
+#define GOING_DOWN 2 ; Going down
+#define WAITING_DOOR 3 ; Waiting for door
 
-.def currentElevatorStatus = r19 ; elevator status
-; elevator status consts
-#define IDLE 0 ; elevator stopped
-#define GOING_DOWN 1 ; elevator is going up
-#define GOING_UP 2 ; elevator is going down
-#define WAITING_DOOR 3
+; Elevator call priorities constants
+#define EXTERNAL_CALL 1 ; Lower priority
+#define INTERNAL_CALL 2 ; Higher priority
 
-.def calledGroundPriority = r20 ; checker for priority of the ground floor
-.def calledFirstPriority = r21 ; checker for priority of the first floor
-.def calledSecondPriority = r22 ; checker for priority of the second floor
+.def temp = r16 ; Used for configuration
+.def countSeconds = r17 ; Used to count seconds
 
-#define INTERNAL_CALL 1 ; higher priority
-#define EXTERNAL_CALL 2 ; lower priority
+; Floor and elevator
+; (See elevator status constants)
+.def currentFloor = r18 ; Used to save the current floor
+.def calledFloor = r19 ; Used to save the last floor called
+.def currentElevatorStatus = r20 ; Used to save elevator status
 
-; BEGIN Consts for setting up the timer
+; Elevator priorities
+.def calledFirstPriority = r21 ; Used to check first floor priority
+.def calledGroundPriority = r20 ; Used to check ground floor priority
+.def calledSecondPriority = r22 ; Used to check second floor priority
+
+; BEGIN Constants to configure the timer
+#define TimerDelaySeconds 1 ; Seconds 
+#define CLOCK 16 ; Clock speed
 #define TOP_LIMIT 65535
-#define CLOCK 16 ; clock speed
-#define TimerDelaySeconds 1 ; seconds 
-.equ PRESCALE = 0b100 ; 256 prescale
+
 .equ PRESCALE_DIV = 256
+.equ PRESCALE = 0b100 ; 256 Prescale
 .equ WGM = 0b0100 ; Waveform generation mode: CTC
-; ensure that the value if between 0 and 6535
+; Ensure that the value if between 0 and 6535
 .equ TOP = int(0.5 + ((CLOCK / PRESCALE_DIV) * DELAY))
 .if TOP > TOP_LIMIT
 .error "TOP is out of range"
 .endif
-; END Consts for setting up the timer
+; END Constants to configure the timer
 
+; BEGIN Reset
 reset:
   ; BEGIN Stack initialization
   ldi temp low(RAMEND)
@@ -48,26 +53,32 @@ reset:
   out SPH, temp
   ; END Stack initialization
 
-  ;configure INT0 and INT1 sense
-	ldi temp, (0b11 << ISC10) | (0b11 << ISC00) ;positive edge triggers
+  ; Configure external interrupts (INT0 and INT1)
+  ; Configure for positive edge-triggered use
+	ldi temp, (0b11 << ISC10) | (0b11 << ISC00)
 	sts EICRA, temp
-	;enable int0, int1
+	
+  ; Enable INT0 and INT1
 	ldi temp, (1 << INT0) | (1 << INT1)
 	out EIMSK, temp
 
   ldi countSeconds, 0
-  ldi currentFloor, FLOOR
+  ldi calledFloor, GROUND_FLOOR
+  ldi currentFloor, GROUND_FLOOR
   ldi currentElevatorStatus, IDLE
 
-  ldi calledGroundPriority, 0
   ldi calledFirstPriority, 0
+  ldi calledGroundPriority, 0
   ldi calledSecondPriority, 0
 
   rjmp loop
-; end reset
+; END Reset
 
-loop: 
-  sei ; enable interruptions
+
+; BEGIN Loop
+loop:
+  ; Set Enable Interrupts 
+  sei
 
   ; let us suppose that this concerns first floor.
   
@@ -106,7 +117,7 @@ loop:
     jmp WaitingRountine
 
   rjmp loop
-
+; END Loop
 
 idleRoutine:
   ldi countSeconds, 0 ; no time should pass if elevator is idle
