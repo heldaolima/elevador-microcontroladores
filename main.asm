@@ -63,13 +63,7 @@ reset:
 	out EIMSK, temp
 
   ldi countSeconds, 0
-  ldi calledFloor, GROUND_FLOOR
-  ldi currentFloor, GROUND_FLOOR
   ldi currentElevatorStatus, IDLE
-
-  ldi calledFirstPriority, 0
-  ldi calledGroundPriority, 0
-  ldi calledSecondPriority, 0
 
   rjmp loop
 ; END Reset
@@ -132,6 +126,7 @@ WaitingRountine:
   rjmp noBuzz
 
   buzz:
+    nop
     ; Buzzer goes here
 
   noBuzz:
@@ -143,6 +138,7 @@ WaitingRountine:
     ; LED
     ; BUZZ
     ldi countSeconds, 0
+    ldi currentElevatorStatus, IDLE
     jmp loop
 
 ExternalButton_GroundFloor_Pressed:
@@ -249,7 +245,6 @@ goingUpRoutine:
     cpi countSeconds, 3 
     rjmp continueGoToFloor
     jmp loop
-    
 
   continueGoToFloor:
     cpi currentFloor, GROUND_FLOOR
@@ -299,25 +294,68 @@ ArriveAtFirstFloor:
     ldi currentElevatorStatus, GOING_DOWN
     jmp loop  
 
+ArriveAtSecondFloor:
+  nop
 
 goingDownRoutine:
-  cpi currentFloor, SECOND_FLOOR
-  brne firstToGround
-
-  cpi countSeconds, 6
-  breq continueSecondToGround
+  cpi countSeconds, 3 
+  breq continueGoDown
   jmp loop
 
-  firstToGround:
-    cpi countSeconds, 3
-    breq continueFirstToGround
+  continueGoDown:
+    cpi currentFloor, SECOND_FLOOR
+    breq ArriveAtFistFloorFromSecond
+
+    cpi currentFloor, FIRST_FLOOR
+    breq ArriveAtGroundFloorFromFirst
+
     jmp loop
 
-  continueSecondToGround:
-    nop
-  
-  continueFirstToGround:
-    nop
+
+ArriveAtFistFloorFromSecond:
+  cpi calledFirstPriority, INTERNAL_CALL ; higher priority
+  breq OpenFirstFloorDown
+
+  cpi calledFirstPriority, EXTERNAL_CALL ; lower priority
+  breq OpenFirstFloorDown
+
+  cpi calledGroundPriority, INTERNAL_CALL ; ground has higher priority -> go there
+  breq goDownToGroundFloor
+
+  cpi calledGroundPriority, EXTERNAL_CALL
+  breq goDownToGroundFloor
+
+  cpi calledSecondPriority, INTERNAL_CALL
+  breq goUpFromHere
+
+  cpi calledSecondPriority, EXTERNAL_CALL
+  breq goUpFromHere
+
+  ldi currentFloor, FIRST_FLOOR
+  ldi calledFirstPriority, 0
+  ldi countSeconds, 0
+  jmp idleRoutine
+
+  OpenFirstFloorDown:
+    ldi currentElevatorStatus, WAITING_DOOR
+    ldi currentFloor, FIRST_FLOOR
+    ldi calledFirstPriority, 0
+    ldi countSeconds, 0
+    ; LED goes here
+    jmp loop
+
+    goDownToGroundFloor:
+      ldi countSeconds, 0
+      ldi currentFloor, FIRST_FLOOR
+      ; LED goes here
+      jmp loop
+
+    goUpFromHere:
+      ldi currentFloor, FIRST_FLOOR
+      ldi countSeconds, 0
+      ldi calledFirstPriority, 0
+      ldi currentElevatorStatus, GOING_UP
+      jmp loop
 
 ; timer interrupt: Increase countSeconds every second
 timerInterruption: 
