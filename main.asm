@@ -295,7 +295,41 @@ ArriveAtFirstFloor:
     jmp loop  
 
 ArriveAtSecondFloor:
-  nop
+    ldi countSeconds, 0 ; restart timer
+    ldi currentFloor, SECOND_FLOOR ; update current floor
+
+    cpi calledFirstPriority, INTERNAL_CALL
+    breq GoToFirstFloor
+
+    cpi calledFirstPriority, EXTERNAL_CALL
+    breq GoToFirstFloor
+
+    cpi calledGroundPriority, INTERNAL_CALL
+    breq goToGround
+
+    cpi calledGroundPriority, EXTERNAL_CALL
+    breq goToGround
+
+    ldi calledSecondPriority, 0
+    jmp idleRoutine
+
+    OpenSecondFloor:
+        ldi calledSecondPriority, 0 ; second not pressed
+        ldi currentElevatorStatus, WAITING_DOOR 
+        ; LED goes here: display current floor
+        jmp loop
+
+    GoToFirstFloor:
+        ldi countSeconds, 3
+        ldi calledSecondPriority, 0
+        ldi currentElevatorStatus, GOING_DOWN
+        jmp loop  
+
+    goToGround:
+        ldi countSeconds, 3
+        ldi calledFirstPriority, 0
+        ldi currentElevatorStatus, GOING_DOWN
+        jmp loop                                                                                       
 
 goingDownRoutine:
   cpi countSeconds, 3 
