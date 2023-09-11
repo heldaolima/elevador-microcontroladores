@@ -1,4 +1,8 @@
+.cseg
+
 jmp reset
+.org OC1Aaddr
+jmp OCI1A_Interrupt
 
 ; Floor constants
 #define FIRST_FLOOR 1
@@ -29,17 +33,20 @@ jmp reset
 .def calledGroundPriority = r20 ; Used to check ground floor priority
 .def calledSecondPriority = r22 ; Used to check second floor priority
 
-; BEGIN Constants to configure the timer
-#define TimerDelaySeconds 1 ; Seconds 
-#define CLOCK 16 ; Clock speed
-#define TOP_LIMIT 65535
+.def status = r23
 
+; BEGIN Constants to configure the timer
+; Retirado do slide "Semana 06 - Timers", página 19
+#define TimerDelaySeconds 1 ; Seconds 
+#define CLOCK 16.0e6 ; 16MHz Clock speed
+#define TOP_LIMIT 65535
+#define DELAY 0.01 ;seconds ; @todo Talvez mudar esse tempo de delay
 .equ PRESCALE_DIV = 256
 .equ PRESCALE = 0b100 ; 256 Prescale
 .equ WGM = 0b0100 ; Waveform generation mode: CTC
-; Ensure that the value if between 0 and 6535
+; Ensure that the value if between 0 and 65535
 .equ TOP = int(0.5 + ((CLOCK / PRESCALE_DIV) * DELAY))
-.if TOP > TOP_LIMIT
+.if TOP > 65535 ; TOP > TOP_LIMIT
 .error "TOP is out of range"
 .endif
 ; END Constants to configure the timer
@@ -47,7 +54,7 @@ jmp reset
 ; BEGIN Reset
 reset:
   ; BEGIN Stack initialization
-  ldi temp low(RAMEND)
+  ldi temp, low(RAMEND)
   out SPL, temp
   ldi temp, high(RAMEND)
   out SPH, temp
@@ -62,12 +69,51 @@ reset:
 	ldi temp, (1 << INT0) | (1 << INT1)
 	out EIMSK, temp
 
+  ; Carrega TOP em OCR1A
+  ldi temp, high(TOP)
+  sts OCR1AH, temp
+  ldi temp, low(TOP)
+  sts OCR1AL, temp
+
   ldi countSeconds, 0
   ldi currentElevatorStatus, IDLE
 
   rjmp loop
 ; END Reset
 
+; BEGIN OCI1A_Interrupt
+; Referência: Slide Semana 06 - Timers
+; Incrementa 'countSeconds' a cada 1 segundo
+OCI1A_Interrupt:
+  push r16				; Salva valor original
+  in r16, SREG
+  push r16				; Salva SREG
+  ; tarefa da interrupção:
+  inc countSeconds
+  ; fim da tarefa
+  pop r16				; Restaura SREG
+  out SREG, r16
+  pop r16				; Restaura R16 original
+; END OCI1A_Interrupt
+
+; BEGIN debounce
+; Função para evitar o efeito "bounce" ao pressionar um botão
+; Executa um delay de 20ms até considerar outro click do botão
+; Referência: Slide Aula 08 - Interrupções
+debounce:
+  ;            clockMHz     delayMs
+  ;               v           v
+  ldi r31, byte3(16 * 1000 * 20 / 5)
+  ldi r30, high (16 * 1000 * 20 / 5)
+  ldi r29, low  (16 * 1000 * 20 / 5)
+
+  subi r29, 1
+  sbci r30, 0
+  sbci r31, 0
+  brcc pc-3
+
+  ret
+; END debounce
 
 ; BEGIN Loop
 loop:
@@ -130,7 +176,7 @@ WaitingRountine:
     ; Buzzer goes here
 
   noBuzz:
-    cpi count, 10
+    cpi countSeconds, 10
     breq CloseDoor
     jmp loop
   
@@ -142,7 +188,7 @@ WaitingRountine:
     jmp loop
 
 ExternalButton_GroundFloor_Pressed:
-  ; debounce goes here
+  rcall debounce	; wait 20ms
   ; led goes here
   ldi calledFloor, GROUND_FLOOR ; ground floor was called
   cpi calledGroundPriority, INTERNAL_CALL ; checks if call has higher priority, keep going
@@ -158,7 +204,7 @@ ExternalButton_GroundFloor_Pressed:
 
 
 ExternalButton_FirstFloor_Pressed:
-  ; debounce goes here
+  rcall debounce	; wait 20ms
   ; led goes here
   ldi calledFloor, FIRST_FLOOR
   cpi calledFirstPriority, INTERNAL_CALL
@@ -173,7 +219,7 @@ ExternalButton_FirstFloor_Pressed:
   rjmp loop
 
 ExternalButton_SecondFloor_Pressed:
-  ; debounce goes here
+  rcall debounce	; wait 20ms
   ; led goes here
   ldi calledFloor, SECOND_FLOOR
   cpi calledSecondPriority, INTERNAL_CALL
@@ -188,7 +234,7 @@ ExternalButton_SecondFloor_Pressed:
   rjmp loop
 
 InternalButton_GroundFloor_Pressed:
-  ; debounce goes here
+  rcall debounce	; wait 20ms
   ; led goes here
   ldi calledFloor, GROUND_FLOOR
   ldi calledGroundPriority, INTERNAL_CALL ; call has higher priority
@@ -198,7 +244,7 @@ InternalButton_GroundFloor_Pressed:
   rjmp loop
 
 InternalButton_FirstFloor_Pressed:
-  ; debounce goes here
+  rcall debounce	; wait 20ms
   ; led goes here
   ldi calledFloor, FIRST_FLOOR
   ldi calledFirstPriority, INTERNAL_CALL ; call has higher priority
@@ -208,7 +254,7 @@ InternalButton_FirstFloor_Pressed:
   rjmp loop
 
 InternalButton_SecondFloor_Pressed:
-  ; debounce goes here
+  rcall debounce	; wait 20ms
   ; led goes here
   ldi calledFloor, SECOND_FLOOR
   ldi calledSecondPriority, INTERNAL_CALL
@@ -284,7 +330,7 @@ ArriveAtFirstFloor:
     jmp loop
 
   GoToSecondFloor:
-    ldi count, 0
+    ldi countSeconds, 0
     ; LED goes here
     jmp loop
 
@@ -323,13 +369,13 @@ ArriveAtSecondFloor:
         ldi countSeconds, 3
         ldi calledSecondPriority, 0
         ldi currentElevatorStatus, GOING_DOWN
-        jmp loop  
+        jmp loop
 
-    goToGround:
-        ldi countSeconds, 3
-        ldi calledFirstPriority, 0
-        ldi currentElevatorStatus, GOING_DOWN
-        jmp loop                                                                                       
+;    goToGround:
+;        ldi countSeconds, 3
+;        ldi calledFirstPriority, 0
+;        ldi currentElevatorStatus, GOING_DOWN
+;        jmp loop
 
 goingDownRoutine:
   cpi countSeconds, 3 
@@ -345,6 +391,9 @@ goingDownRoutine:
 
     jmp loop
 
+ArriveAtGroundFloorFromFirst:
+	; @todo
+	nop
 
 ArriveAtFistFloorFromSecond:
   cpi calledFirstPriority, INTERNAL_CALL ; higher priority
@@ -391,15 +440,4 @@ ArriveAtFistFloorFromSecond:
       ldi currentElevatorStatus, GOING_UP
       jmp loop
 
-; timer interrupt: Increase countSeconds every second
-timerInterruption: 
-  push r17 ; a.k.a. countSeconds
-  in r17, SREG
-  push r17
-  
-  inc countSeconds
 
-  pop r17
-  out SREG, r17
-  pop r17
-  reti
