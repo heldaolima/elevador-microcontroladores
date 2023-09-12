@@ -410,7 +410,9 @@ ArriveAtFirstFloor:
     jmp loop
 
   GoToSecondFloor:
-    ldi countSeconds, 0
+    ldi countSeconds, 3
+    ldi calledFirstPriority, 0
+    ldi currentElevatorStatus, GOING_UP
     ; LED goes here
     jmp loop
 
@@ -431,10 +433,10 @@ ArriveAtSecondFloor:
     breq GoToFirstFloor
 
     cpi calledGroundPriority, INTERNAL_CALL
-    breq goToGround
+    breq goToGroundFromSecond
 
     cpi calledGroundPriority, EXTERNAL_CALL
-    breq goToGround
+    breq goToGroundFromSecond
 
     ldi calledSecondPriority, 0
     jmp idleRoutine
@@ -451,11 +453,11 @@ ArriveAtSecondFloor:
         ldi currentElevatorStatus, GOING_DOWN
         jmp loop
 
-;    goToGround:
-;        ldi countSeconds, 3
-;        ldi calledFirstPriority, 0
-;        ldi currentElevatorStatus, GOING_DOWN
-;        jmp loop
+    goToGroundFromSecond:
+        ldi countSeconds, 3
+        ldi calledFirstPriority, 0
+        ldi currentElevatorStatus, GOING_DOWN
+        jmp loop
 
 goingDownRoutine:
   cpi countSeconds, 3 
