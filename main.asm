@@ -1,12 +1,48 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;
+;
+; Display de 7 segmentos:
+;   O número a ser exibido é enviado para o BCD através dos
+;   pinos PD0 a PD3 (0 a 4)
+;
+; LED:
+;   Recebe o dado pelo pino PD4
+;
+; Buzzer
+;   Recebe o dado pelo pino PD5
+;
+; Botões internos
+;   Lê dos pinos PB0 (térreo), PB1 (primeiro andar) e PB2 (segundo andar)
+;
+; Botões externos
+;   @todo
+;
+;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 .cseg
+
+.equ ClockMHz = 16 ; Clock do microcontrolador 
+
+.equ pino_display_andar = PD0 ; Pinos usados pelo BCD do display: PD0 a PD3
+.equ pino_led = PD4; Pino usado pelo LED
+.equ pino_buzzer = PD5 ; Pino usado pelo buzzer
+
+.equ pino_interno_terreo = PB0 ; Pino usado pelo botão interno do térreo
+.equ pino_interno_primeiro = PB1 ; Pino usado pelo botão interno do térreo
+.equ pino_interno_segundo = PB2 ; Pino usado pelo botão externo do térreo
+
+; .equ pino_externo_terreo = 
+; .equ pino_externo_primeiro = 
+; .equ pino_externo_segundo = 
 
 jmp reset
 .org OC1Aaddr
 jmp OCI1A_Interrupt
 
 ; Floor constants
-#define FIRST_FLOOR 1
 #define GROUND_FLOOR 0
+#define FIRST_FLOOR 1
 #define SECOND_FLOOR 2
 
 ; Elevator status constants
@@ -75,6 +111,17 @@ reset:
   ldi temp, low(TOP)
   sts OCR1AL, temp
 
+  ; BEGIN Instancia a porta D
+  ;               vvvv Pinos PD3 a PD0 (BCD)
+  ldi temp, 0b00111111
+  ;             ^^ Pinos PD5 e PD4 (LED e Buzzer)
+  out DDRD, temp ; Seta a direção dos dados dos pinos
+
+  ldi temp, 0b00000000
+  out PORTD, temp ; Zera a saída das portas D
+
+  ; END Instancia a porta D
+
   ldi countSeconds, 0
   ldi currentElevatorStatus, IDLE
 
@@ -101,7 +148,7 @@ OCI1A_Interrupt:
 ; Executa um delay de 20ms até considerar outro click do botão
 ; Referência: Slide Aula 08 - Interrupções
 debounce:
-  ;            clockMHz     delayMs
+  ;           clock(MHz)   delay(ms)
   ;               v           v
   ldi r31, byte3(16 * 1000 * 20 / 5)
   ldi r30, high (16 * 1000 * 20 / 5)
@@ -119,6 +166,11 @@ debounce:
 loop:
   ; Set Enable Interrupts 
   sei
+
+  ; @todo só pra testar parte do circuito
+  ; acende o led, o buzzer e mostra o número 2 no display
+  ldi temp, 0b00110010 ; acende LED e buzzer
+  out PORTD, temp
 
   ; let us suppose that this concerns first floor.
   
@@ -300,6 +352,34 @@ goingUpRoutine:
     breq ArriveAtSecondFloor ; next stop is second floor
 
     jmp loop
+
+; BEGIN ArriveAtGroundFloor
+ArriveAtGroundFloor:
+  ldi countSeconds, 0 ; restart timer
+  ldi currentFloor, GROUND_FLOOR ; update current floor
+
+  cpi calledGroundPriority, INTERNAL_CALL ; IF internal button to ground was pressed
+  breq OpenGroundDoor                     ; THEN we open the door
+
+  cpi calledGroundPriority, EXTERNAL_CALL ; IF external button to ground was pressed
+  breq OpenGroundDoor                     ; THEN we open the door
+
+  cpi calledFirstPriority, INTERNAL_CALL ; IF internal button to first floor was pressed
+  breq GoToFirstFloor                    ; THEN we go there
+
+  cpi calledFirstPriority, EXTERNAL_CALL ; IF external button to first floor was pressed
+  breq GoToFirstFloor                    ; THEN we go there
+
+  cpi calledSecondPriority, INTERNAL_CALL ; IF internal button to second floor was pressed
+  breq GoToSecondFloor                    ; THEN we go there
+
+  cpi calledSecondPriority, EXTERNAL_CALL ; IF external button to second floor was pressed
+  breq GoToSecondFloor                    ; THEN we go there
+
+  OpenGroundDoor:
+    ; LED goes here: display current floor
+    nop ; @todo
+; END ArriveAtGroundFloor
 
 ArriveAtFirstFloor:
   ldi countSeconds, 0 ; restart timer
