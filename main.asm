@@ -30,7 +30,10 @@
 
 .equ pino_interno_terreo = PB0 ; Pino usado pelo botão interno do térreo
 .equ pino_interno_primeiro = PB1 ; Pino usado pelo botão interno do térreo
-.equ pino_interno_segundo = PB2 ; Pino usado pelo botão externo do térreo
+.equ pino_interno_segundo = PB2 ; Pino usado pelo botão interno do térreo
+.equ pino_externo_terreo = PB3
+.equ pino_externo_primeiro = PB4
+.equ pino_externo_segundo = PB5
 
 ; .equ pino_externo_terreo = 
 ; .equ pino_externo_primeiro = 
@@ -65,18 +68,18 @@ jmp OCI1A_Interrupt
 .def currentElevatorStatus = r20 ; Used to save elevator status
 
 ; Elevator priorities
-.def calledFirstPriority = r21 ; Used to check first floor priority
-.def calledGroundPriority = r20 ; Used to check ground floor priority
-.def calledSecondPriority = r22 ; Used to check second floor priority
+.def calledGroundPriority = r21 ; Used to check ground floor priority
+.def calledFirstPriority = r22 ; Used to check first floor priority
+.def calledSecondPriority = r23 ; Used to check second floor priority
 
-.def status = r23
+.def status = r24
 
 ; BEGIN Constants to configure the timer
 ; Retirado do slide "Semana 06 - Timers", página 19
 #define TimerDelaySeconds 1 ; Seconds 
 #define CLOCK 16.0e6 ; 16MHz Clock speed
 #define TOP_LIMIT 65535
-#define DELAY 0.01 ;seconds ; @todo Talvez mudar esse tempo de delay
+#define DELAY 1 ;seconds ;
 .equ PRESCALE_DIV = 256
 .equ PRESCALE = 0b100 ; 256 Prescale
 .equ WGM = 0b0100 ; Waveform generation mode: CTC
@@ -96,20 +99,20 @@ reset:
   out SPH, temp
   ; END Stack initialization
 
-  ; Configure external interrupts (INT0 and INT1)
-  ; Configure for positive edge-triggered use
-	ldi temp, (0b11 << ISC10) | (0b11 << ISC00)
-	sts EICRA, temp
-	
-  ; Enable INT0 and INT1
-	ldi temp, (1 << INT0) | (1 << INT1)
-	out EIMSK, temp
-
-  ; Carrega TOP em OCR1A
-  ldi temp, high(TOP)
+  ldi temp, high(TOP) ; Carregando TOP em OCR1A
   sts OCR1AH, temp
   ldi temp, low(TOP)
   sts OCR1AL, temp
+
+  ldi temp, ((WGM&0b11)<<WGM10) ; Carrega WGM e PreScale
+  sts TCCR1A, temp 
+  ldi temp, ((WGM>> 2) << WGM12)|(PRESCALE << CS10)
+  sts TCCR1B, temp 
+
+  lds temp, TIMSK1
+  sbr temp, 1 <<OCIE1A
+  sts TIMSK1, temp
+  // END 1 second timer
 
   ; BEGIN Instancia a porta D
   ;               vvvv Pinos PD3 a PD0 (BCD)
@@ -122,7 +125,12 @@ reset:
 
   ; END Instancia a porta D
 
-  ldi countSeconds, 0
+  ; BEGIN instancia porta B para botões
+  ldi temp, 0b00000000
+  out PORTB, temp
+  ;END
+
+  ;ldi countSeconds, 0
   ldi currentElevatorStatus, IDLE
 
   rjmp loop
@@ -141,6 +149,7 @@ OCI1A_Interrupt:
   pop r16				; Restaura SREG
   out SREG, r16
   pop r16				; Restaura R16 original
+  reti
 ; END OCI1A_Interrupt
 
 ; BEGIN debounce
@@ -169,19 +178,29 @@ loop:
 
   ; @todo só pra testar parte do circuito
   ; acende o led, o buzzer e mostra o número 2 no display
-  ldi temp, 0b00110010 ; acende LED e buzzer
-  out PORTD, temp
+  ldi temp, 0b0001; acende LED e buzzer
+  out PORTD, countSeconds
 
   ; let us suppose that this concerns first floor.
   
   ; external buttons pressed
+  sbic PIND, pino_externo_terreo
   rjmp ExternalButton_GroundFloor_Pressed
+  
+  sbic PIND, pino_externo_primeiro
   rjmp ExternalButton_FirstFloor_Pressed
+  
+  sbic PIND, pino_externo_segundo
   rjmp ExternalButton_SecondFloor_Pressed
 
   ; internal buttons pressed
+  sbic PIND, pino_interno_terreo 
   rjmp InternalButton_GroundFloor_Pressed
+  
+  sbic PIND, pino_interno_primeiro
   rjmp InternalButton_FirstFloor_Pressed
+  
+  sbic PIND, pino_interno_segundo
   rjmp InternalButton_SecondFloor_Pressed
 
   cpi currentElevatorStatus, IDLE
@@ -410,9 +429,7 @@ ArriveAtFirstFloor:
     jmp loop
 
   GoToSecondFloor:
-    ldi countSeconds, 3
-    ldi calledFirstPriority, 0
-    ldi currentElevatorStatus, GOING_UP
+    ldi countSeconds, 0
     ; LED goes here
     jmp loop
 
@@ -433,10 +450,10 @@ ArriveAtSecondFloor:
     breq GoToFirstFloor
 
     cpi calledGroundPriority, INTERNAL_CALL
-    breq goToGroundFromSecond
+    breq goToGround
 
     cpi calledGroundPriority, EXTERNAL_CALL
-    breq goToGroundFromSecond
+    breq goToGround
 
     ldi calledSecondPriority, 0
     jmp idleRoutine
@@ -453,11 +470,11 @@ ArriveAtSecondFloor:
         ldi currentElevatorStatus, GOING_DOWN
         jmp loop
 
-    goToGroundFromSecond:
-        ldi countSeconds, 3
-        ldi calledFirstPriority, 0
-        ldi currentElevatorStatus, GOING_DOWN
-        jmp loop
+;    goToGround:
+;        ldi countSeconds, 3
+;        ldi calledFirstPriority, 0
+;        ldi currentElevatorStatus, GOING_DOWN
+;        jmp loop
 
 goingDownRoutine:
   cpi countSeconds, 3 
@@ -521,5 +538,4 @@ ArriveAtFistFloorFromSecond:
       ldi calledFirstPriority, 0
       ldi currentElevatorStatus, GOING_UP
       jmp loop
-
 
