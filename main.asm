@@ -1,43 +1,20 @@
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;
-;
-; Display de 7 segmentos:
-;   O número a ser exibido é enviado para o BCD através dos
-;   pinos PD0 a PD3 (0 a 4)
-;
-; LED:
-;   Recebe o dado pelo pino PD4
-;
-; Buzzer
-;   Recebe o dado pelo pino PD5
-;
-; Botões internos
-;   Lê dos pinos PB0 (térreo), PB1 (primeiro andar) e PB2 (segundo andar)
-;
-; Botões externos
-;   @todo
-;
-;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 .cseg
 
 .equ ClockMHz = 16 ; Clock do microcontrolador 
 
 .equ pino_display_andar = PD0 ; Pinos usados pelo BCD do display: PD0 a PD3
-.equ pino_led = PD4; Pino usado pelo LED
-.equ pino_buzzer = PD5 ; Pino usado pelo buzzer
+.equ pino_buzzer = PD4 ; Pino usado pelo buzzer
+.equ pino_led = PD5; Pino usado pelo LED
 
-.equ pino_interno_terreo = PB0 ; Pino usado pelo botão interno do térreo
-.equ pino_interno_primeiro = PB1 ; Pino usado pelo botão interno do térreo
-.equ pino_interno_segundo = PB2 ; Pino usado pelo botão interno do térreo
-.equ pino_externo_terreo = PB3
-.equ pino_externo_primeiro = PB4
-.equ pino_externo_segundo = PB5
+.equ pino_interno_segundo = PB0 ; Pino usado pelo botão interno do segundo andar
+.equ pino_interno_primeiro = PB1 ; Pino usado pelo botão interno do primeiro andar
+.equ pino_interno_terreo = PB2 ; Pino usado pelo botão interno do térreo
+.equ pino_abrir_porta = PB3 ; Pino usado pelo botão de abrir a porta
+.equ pino_fechar_porta = PB4 ; Pino usado pelo botão de fechar a porta
 
-; .equ pino_externo_terreo = 
-; .equ pino_externo_primeiro = 
-; .equ pino_externo_segundo = 
+.equ pino_externo_segundo = PC5 ; Pino usado pelo botão externo do segundo andar
+.equ pino_externo_primeiro = PC4 ; Pino usado pelo botão externo do primeiro andar
+.equ pino_externo_terreo = PC3 ;  Pino usado pelo botão externo do térreo
 
 jmp reset
 .org OC1Aaddr
@@ -58,6 +35,10 @@ jmp OCI1A_Interrupt
 #define EXTERNAL_CALL 1 ; Lower priority
 #define INTERNAL_CALL 2 ; Higher priority
 
+; Elevator door constants 
+#define DOOR_CLOSED 0
+#define DOOR_OPEN 1;
+
 .def temp = r16 ; Used for configuration
 .def countSeconds = r17 ; Used to count seconds
 
@@ -72,7 +53,8 @@ jmp OCI1A_Interrupt
 .def calledFirstPriority = r22 ; Used to check first floor priority
 .def calledSecondPriority = r23 ; Used to check second floor priority
 
-.def status = r24
+; Elevator door status
+.def isDoorOpen = r24
 
 ; BEGIN Constants to configure the timer
 ; Retirado do slide "Semana 06 - Timers", página 19
@@ -114,24 +96,32 @@ reset:
   sts TIMSK1, temp
   // END 1 second timer
 
-  ; BEGIN Instancia a porta D
+  ; BEGIN Instancia a porta D usada para Display, Led e Buzzer
   ;               vvvv Pinos PD3 a PD0 (BCD)
   ldi temp, 0b00111111
-  ;             ^^ Pinos PD5 e PD4 (LED e Buzzer)
+  ;           ^^ Pinos PD5 e PD4 (LED e Buzzer)
   out DDRD, temp ; Seta a direção dos dados dos pinos
 
   ldi temp, 0b00000000
   out PORTD, temp ; Zera a saída das portas D
+  ; END
 
-  ; END Instancia a porta D
-
-  ; BEGIN instancia porta B para botões
+  ; BEGIN instancia porta B para botões internos do elevador
   ldi temp, 0b00000000
-  out PORTB, temp
-  ;END
+  out DDRB, temp
+  out PORTB, temp  
+  ; END
+
+  ; BEGIN instancia porta C para botões externos do elevador
+  ldi temp, 0b00000000
+  out DDRC, temp
+  out PORTC, temp  
+  ; END
 
   ;ldi countSeconds, 0
   ldi currentElevatorStatus, IDLE
+  ldi currentFloor, GROUND_FLOOR
+  ldi isDoorOpen, DOOR_CLOSED
 
   rjmp loop
 ; END Reset
@@ -175,33 +165,34 @@ debounce:
 loop:
   ; Set Enable Interrupts 
   sei
-
-  ; @todo só pra testar parte do circuito
-  ; acende o led, o buzzer e mostra o número 2 no display
-  ldi temp, 0b0001; acende LED e buzzer
-  out PORTD, countSeconds
-
-  ; let us suppose that this concerns first floor.
-  
   ; external buttons pressed
-  sbic PIND, pino_externo_terreo
+  sbic PINC, pino_externo_terreo
   rjmp ExternalButton_GroundFloor_Pressed
   
-  sbic PIND, pino_externo_primeiro
+  sbic PINC, pino_externo_primeiro
   rjmp ExternalButton_FirstFloor_Pressed
   
-  sbic PIND, pino_externo_segundo
+  sbic PINC, pino_externo_segundo
   rjmp ExternalButton_SecondFloor_Pressed
 
   ; internal buttons pressed
-  sbic PIND, pino_interno_terreo 
+  sbic PINB, pino_interno_terreo 
   rjmp InternalButton_GroundFloor_Pressed
   
-  sbic PIND, pino_interno_primeiro
+  sbic PINB, pino_interno_primeiro
   rjmp InternalButton_FirstFloor_Pressed
   
-  sbic PIND, pino_interno_segundo
+  sbic PINB, pino_interno_segundo
   rjmp InternalButton_SecondFloor_Pressed
+
+  sbic PINB, pino_abrir_porta 
+  jmp OpenDoor_Pressed
+
+  sbic PINB, pino_fechar_porta
+  jmp CloseDoor_Pressed
+
+  cpi isDoorOpen, DOOR_OPEN
+  breq callWaitingRoutine
 
   cpi currentElevatorStatus, IDLE
   breq callIdleRoutine ; chamar rotina para elevador parado
@@ -211,9 +202,6 @@ loop:
 
   cpi currentElevatorStatus, GOING_DOWN
   breq callGoingDownRoutine ; chamar rotina para elevador descendo
-
-  cpi currentElevatorStatus, WAITING_DOOR
-  breq callWaitingRoutine
 
   callIdleRoutine:
     jmp idleRoutine
@@ -232,19 +220,17 @@ loop:
 
 idleRoutine:
   ldi countSeconds, 0 ; no time should pass if elevator is idle
-  ldi status, IDLE ; reinsure it is idle
+  ldi currentElevatorStatus, IDLE ; reinsure it is idle
   jmp loop ; go back
 
 WaitingRountine:
-  ; LED goes here
-
+  sbi PORTD, pino_led
   cpi countSeconds, 5
   breq buzz
   rjmp noBuzz
 
   buzz:
-    nop
-    ; Buzzer goes here
+    sbi PORTD, pino_buzzer
 
   noBuzz:
     cpi countSeconds, 10
@@ -252,15 +238,15 @@ WaitingRountine:
     jmp loop
   
   CloseDoor:
-    ; LED
-    ; BUZZ
+    cbi PORTD, pino_buzzer
+    cbi PORTD, pino_led
     ldi countSeconds, 0
+	ldi isDoorOpen, DOOR_CLOSED
     ldi currentElevatorStatus, IDLE
     jmp loop
 
 ExternalButton_GroundFloor_Pressed:
   rcall debounce	; wait 20ms
-  ; led goes here
   ldi calledFloor, GROUND_FLOOR ; ground floor was called
   cpi calledGroundPriority, INTERNAL_CALL ; checks if call has higher priority, keep going
   breq continueGround
@@ -276,7 +262,6 @@ ExternalButton_GroundFloor_Pressed:
 
 ExternalButton_FirstFloor_Pressed:
   rcall debounce	; wait 20ms
-  ; led goes here
   ldi calledFloor, FIRST_FLOOR
   cpi calledFirstPriority, INTERNAL_CALL
   breq continueFirst
@@ -291,7 +276,6 @@ ExternalButton_FirstFloor_Pressed:
 
 ExternalButton_SecondFloor_Pressed:
   rcall debounce	; wait 20ms
-  ; led goes here
   ldi calledFloor, SECOND_FLOOR
   cpi calledSecondPriority, INTERNAL_CALL
   breq continueSecond
@@ -306,7 +290,6 @@ ExternalButton_SecondFloor_Pressed:
 
 InternalButton_GroundFloor_Pressed:
   rcall debounce	; wait 20ms
-  ; led goes here
   ldi calledFloor, GROUND_FLOOR
   ldi calledGroundPriority, INTERNAL_CALL ; call has higher priority
 
@@ -316,7 +299,6 @@ InternalButton_GroundFloor_Pressed:
 
 InternalButton_FirstFloor_Pressed:
   rcall debounce	; wait 20ms
-  ; led goes here
   ldi calledFloor, FIRST_FLOOR
   ldi calledFirstPriority, INTERNAL_CALL ; call has higher priority
 
@@ -326,7 +308,6 @@ InternalButton_FirstFloor_Pressed:
 
 InternalButton_SecondFloor_Pressed:
   rcall debounce	; wait 20ms
-  ; led goes here
   ldi calledFloor, SECOND_FLOOR
   ldi calledSecondPriority, INTERNAL_CALL
 
@@ -334,6 +315,27 @@ InternalButton_SecondFloor_Pressed:
   breq StartElevator
   rjmp loop
 
+OpenDoor_Pressed:
+	rcall debounce
+
+	cpi isDoorOpen, DOOR_OPEN
+	breq keepDoorOpen
+	jmp loop
+
+	keepDoorOpen: ; segura a porta 
+		sbic PINB, pino_abrir_porta
+		rjmp OpenDoor_Pressed
+	
+	ldi countSeconds, 10
+	jmp loop
+
+CloseDoor_Pressed:
+	rcall debounce
+	cbi PORTD, pino_buzzer
+    cbi PORTD, pino_led
+    ldi countSeconds, 0
+	ldi isDoorOpen, DOOR_CLOSED
+    jmp loop
 
 StartElevator:
   cp currentFloor, calledFloor ; checks if we are in the same floor as the one called
@@ -346,21 +348,21 @@ StartElevator:
   brge higherFloor
 
   sameFloor:
-    ldi status, IDLE ; if on the same floor, do nothing
+    ldi currentElevatorStatus, IDLE ; if on the same floor, do nothing
     jmp loop
   
   lowerFloor:
-    ldi status, GOING_UP
+    ldi currentElevatorStatus, GOING_UP
     jmp loop
   
   higherFloor:
-    ldi status, GOING_DOWN
+    ldi currentElevatorStatus, GOING_DOWN
     jmp loop
 
 
 goingUpRoutine:
-    cpi countSeconds, 3 
-    rjmp continueGoToFloor
+    cpi countSeconds, 3
+	breq continueGoToFloor
     jmp loop
 
   continueGoToFloor:
@@ -396,8 +398,8 @@ ArriveAtGroundFloor:
   breq GoToSecondFloor                    ; THEN we go there
 
   OpenGroundDoor:
-    ; LED goes here: display current floor
-    nop ; @todo
+	sbi PORTD, pino_led
+
 ; END ArriveAtGroundFloor
 
 ArriveAtFirstFloor:
@@ -413,6 +415,9 @@ ArriveAtFirstFloor:
   cpi calledFirstPriority, EXTERNAL_CALL
   breq OpenFirstFloor
 
+  cpi calledSecondPriority, EXTERNAL_CALL ; floor above has higher priority: we need to go there
+  breq GoToSecondFloor
+
   cpi calledGroundPriority, INTERNAL_CALL
   breq goToGround
 
@@ -424,17 +429,18 @@ ArriveAtFirstFloor:
 
   OpenFirstFloor:
     ldi calledFirstPriority, 0 ; first not pressed
-    ldi currentElevatorStatus, WAITING_DOOR ; now we need to wait door to open
-    ; LED goes here: display current floor
+    ldi isDoorOpen, DOOR_OPEN ; now we need to wait door to open
+    out PORTD, currentFloor
     jmp loop
 
   GoToSecondFloor:
     ldi countSeconds, 0
-    ; LED goes here
+	out PORTD, currentFloor
+	ldi currentElevatorStatus, GOING_UP
     jmp loop
 
   goToGround:
-    ldi countSeconds, 3
+    ldi countSeconds, 0
     ldi calledFirstPriority, 0
     ldi currentElevatorStatus, GOING_DOWN
     jmp loop  
@@ -443,6 +449,12 @@ ArriveAtSecondFloor:
     ldi countSeconds, 0 ; restart timer
     ldi currentFloor, SECOND_FLOOR ; update current floor
 
+	cpi calledSecondPriority, INTERNAL_CALL
+	breq OpenSecondFloor
+
+	cpi calledSecondPriority, EXTERNAL_CALL
+	breq OpenSecondFloor
+
     cpi calledFirstPriority, INTERNAL_CALL
     breq GoToFirstFloor
 
@@ -450,31 +462,31 @@ ArriveAtSecondFloor:
     breq GoToFirstFloor
 
     cpi calledGroundPriority, INTERNAL_CALL
-    breq goToGround
+    breq goToGroundFromSecond
 
     cpi calledGroundPriority, EXTERNAL_CALL
-    breq goToGround
+    breq goToGroundFromSecond
 
     ldi calledSecondPriority, 0
     jmp idleRoutine
 
     OpenSecondFloor:
         ldi calledSecondPriority, 0 ; second not pressed
-        ldi currentElevatorStatus, WAITING_DOOR 
-        ; LED goes here: display current floor
+		ldi isDoorOpen, DOOR_OPEN
+		out PORTD, currentFloor
         jmp loop
 
     GoToFirstFloor:
-        ldi countSeconds, 3
+        ldi countSeconds, 0
         ldi calledSecondPriority, 0
         ldi currentElevatorStatus, GOING_DOWN
         jmp loop
 
-;    goToGround:
-;        ldi countSeconds, 3
-;        ldi calledFirstPriority, 0
-;        ldi currentElevatorStatus, GOING_DOWN
-;        jmp loop
+    goToGroundFromSecond:
+        ldi countSeconds, 0
+        ldi calledSecondPriority, 0
+        ldi currentElevatorStatus, GOING_DOWN
+        jmp loop
 
 goingDownRoutine:
   cpi countSeconds, 3 
@@ -491,8 +503,44 @@ goingDownRoutine:
     jmp loop
 
 ArriveAtGroundFloorFromFirst:
-	; @todo
-	nop
+	ldi currentFloor, GROUND_FLOOR
+	ldi countSeconds, 0 ; reseta timer
+
+	cpi calledGroundPriority, INTERNAL_CALL ;prioridade maior
+	breq openGroundFloor
+
+	cpi calledGroundPriority, EXTERNAL_CALL
+	breq openGroundFloor
+
+	cpi calledFirstPriority, INTERNAL_CALL
+	breq goUpFromGround
+
+	cpi calledFirstPriority, EXTERNAL_CALL
+	breq goUpFromGround
+
+	cpi calledSecondPriority, INTERNAL_CALL
+	breq goUpFromGround
+
+	cpi calledSecondPriority, EXTERNAL_CALL
+	breq goUpFromGround
+	
+	ldi calledGroundPriority, 0 ; reseta a prioirdade do terreo
+	jmp idleRoutine
+
+	openGroundFloor:
+		ldi isDoorOpen, DOOR_OPEN
+		ldi calledGroundPriority, 0
+		ldi currentFloor, GROUND_FLOOR
+		out PORTD, currentFloor   
+		jmp loop
+
+	goUpFromGround:
+		ldi currentFloor, GROUND_FLOOR
+		ldi countSeconds, 0
+		out PORTD, currentFloor
+		ldi calledGroundPriority, 0
+		ldi currentElevatorStatus, GOING_UP
+		jmp loop
 
 ArriveAtFistFloorFromSecond:
   cpi calledFirstPriority, INTERNAL_CALL ; higher priority
@@ -519,23 +567,23 @@ ArriveAtFistFloorFromSecond:
   jmp idleRoutine
 
   OpenFirstFloorDown:
-    ldi currentElevatorStatus, WAITING_DOOR
+    ldi isDoorOpen, DOOR_OPEN
     ldi currentFloor, FIRST_FLOOR
     ldi calledFirstPriority, 0
     ldi countSeconds, 0
-    ; LED goes here
-    jmp loop
+    out PORTD, currentFloor
+	jmp loop
 
     goDownToGroundFloor:
       ldi countSeconds, 0
       ldi currentFloor, FIRST_FLOOR
-      ; LED goes here
+      out PORTD, currentFloor
       jmp loop
 
     goUpFromHere:
       ldi currentFloor, FIRST_FLOOR
       ldi countSeconds, 0
+	  out PORTD, currentFloor
       ldi calledFirstPriority, 0
       ldi currentElevatorStatus, GOING_UP
       jmp loop
-
