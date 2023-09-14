@@ -320,22 +320,34 @@ OpenDoor_Pressed:
 
 	cpi isDoorOpen, DOOR_OPEN
 	breq keepDoorOpen
+
+	cpi currentElevatorStatus, IDLE
+	breq goToWaitingRountine
+	
 	jmp loop
 
-	keepDoorOpen: ; segura a porta 
-		sbic PINB, pino_abrir_porta
-		rjmp OpenDoor_Pressed
-	
-	ldi countSeconds, 10
-	jmp loop
+	goToWaitingRountine:
+		ldi isDoorOpen, DOOR_OPEN
+		jmp WaitingRountine
+
+	keepDoorOpen:
+		jmp loop
 
 CloseDoor_Pressed:
 	rcall debounce
+	
+	cpi isDoorOpen, DOOR_CLOSED
+	breq goToLoop
+
 	cbi PORTD, pino_buzzer
     cbi PORTD, pino_led
     ldi countSeconds, 0
 	ldi isDoorOpen, DOOR_CLOSED
+	ldi currentElevatorStatus, IDLE
     jmp loop
+
+	goToLoop:
+		jmp loop
 
 StartElevator:
   cp currentFloor, calledFloor ; checks if we are in the same floor as the one called
